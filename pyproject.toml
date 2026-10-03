@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cue-turn"
+version = "0.1.0"
+description = "Cue: when a voice agent should stop talking, and when it should answer. Barge-in and end-of-turn decisions from the caller's audio."
+readme = "README.md"
+requires-python = ">=3.10"   # the [pipecat] extra needs 3.11+ (Pipecat itself)
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "licenses/*"]
+authors = [{ name = "IOTEverythin" }]
+keywords = ["voice-agent", "turn-taking", "barge-in", "endpointing", "end-of-turn", "interruption", "pipecat", "onnx"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy>=1.24",
+    "onnxruntime>=1.17",
+    "huggingface_hub>=0.23",
+    "soundfile>=0.12",
+]
+
+[project.optional-dependencies]
+full = ["torch>=2.1", "transformers>=4.40", "safetensors>=0.4"]
+pipecat = ["pipecat-ai>=1.1"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+cue-turn = "cue_turn.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/ioteverythin/cue"
+"Model: Cue Tiny" = "https://huggingface.co/IOTEverythin/cue-tiny"
+"Model: Cue v4" = "https://huggingface.co/IOTEverythin/cue-v4"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/cue_turn", "tests", "examples", "licenses", "README.md", "LICENSE", "NOTICE"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cue_turn"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
