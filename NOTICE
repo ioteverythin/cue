@@ -1,0 +1,23 @@
+cue-turn
+Copyright 2026 IOTEverythin
+
+This package contains the runtime code for the Cue models. The code is licensed under
+the Apache License, Version 2.0 (see LICENSE). The model weights are not part of this
+package: they are downloaded from Hugging Face (IOTEverythin/cue-tiny, IOTEverythin/cue-v4,
+IOTEverythin/cue-v3), and each model repository states its own licence and notices.
+
+Third-party code:
+
+src/cue_turn/audio.py (StreamResampler)
+    A numpy port of the default sinc-interpolation resampler of torchaudio
+    (torchaudio.functional.resample), BSD-2-Clause, Copyright (c) 2017 Facebook Inc.
+    (Soumith Chintala). https://github.com/pytorch/audio
+    Its licence: licenses/torchaudio-BSD-2-Clause.txt
+
+src/cue_turn/model.py
+    Uses the encoder of OpenAI Whisper small (Apache-2.0) through Hugging Face
+    transformers (Apache-2.0); Whisper's log-mel front end is reimplemented in torch.
+
+src/cue_turn/pipecat.py
+    Builds on Pipecat (BSD-2-Clause, Copyright (c) 2024-2026 Daily), which it imports and
+    does not include. https://github.com/pipecat-ai/pipecat
