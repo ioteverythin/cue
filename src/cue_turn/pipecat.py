@@ -15,10 +15,19 @@
 Either strategy can be used alone. Both share the session, so each audio frame is
 processed once. Keep a VAD analyzer in the pipeline: the caller's turn still starts on
 VAD while the bot is quiet.
+
+Cue v5 also hears the bot's own audio. Put a CueAgentAudioTap just before the transport's
+output so it can see what the bot plays:
+
+    pipeline = Pipeline([transport.input(), stt, user_aggregator, llm, tts,
+                         CueAgentAudioTap(cue), transport.output(), assistant_aggregator])
+
+Without the tap, v5 runs with that input at zero (as it was also trained); v4 and Tiny ignore it.
 """
 from __future__ import annotations
 
 import time
+from collections import deque
 
 import numpy as np
 from loguru import logger
@@ -32,9 +41,12 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
+    InterruptionFrame,
+    OutputAudioRawFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import MetricsData, TurnMetricsData
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnStartStrategy
 from pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy import TurnAnalyzerUserTurnStopStrategy
@@ -70,6 +82,47 @@ class CueSession:
         self.pending_respond = False
         self.pending_barge: dict | None = None
         self._last_buffer = None
+        self.agent_queue: deque = deque()            # bot audio not yet played (v5), float32 chunks
+        self.agent_rate = 0
+
+    @property
+    def wants_agent_audio(self) -> bool:
+        return bool(getattr(self.model, "two_channel", False))
+
+    def feed_agent(self, buffer: bytes, sample_rate: int, num_channels: int = 1):
+        """Bot audio on its way to the caller (from CueAgentAudioTap)."""
+        if not self.wants_agent_audio or not sample_rate:
+            return
+        a = np.frombuffer(buffer, dtype=np.int16).astype(np.float32) / 32768.0
+        if num_channels > 1:
+            a = a.reshape(-1, num_channels).mean(1)
+        if sample_rate != self.agent_rate:
+            self.agent_queue.clear()
+            self.agent_rate = sample_rate
+            if self.stream is not None:               # the stream started before the bot first spoke
+                from .audio import StreamResampler
+                self.stream.ares = StreamResampler(sample_rate)
+        self.agent_queue.append(a)
+
+    def _agent_span(self, seconds: float):
+        """The bot audio played over the next `seconds` (silence when the bot is quiet), or None
+        if no bot audio has ever been seen (no tap in the pipeline)."""
+        if not self.agent_rate:
+            return None
+        n = int(round(seconds * self.agent_rate))
+        if not self.bot_speaking:
+            return np.zeros(n, np.float32)
+        out, got = [], 0
+        while got < n and self.agent_queue:
+            c = self.agent_queue[0]
+            take = min(len(c), n - got)
+            out.append(c[:take]); got += take
+            if take == len(c):
+                self.agent_queue.popleft()
+            else:
+                self.agent_queue[0] = c[take:]
+        out.append(np.zeros(n - got, np.float32))
+        return np.concatenate(out)
 
     @property
     def p_done(self) -> float:
@@ -81,6 +134,9 @@ class CueSession:
         elif isinstance(frame, BotStoppedSpeakingFrame):
             self.bot_speaking = False
             self.pending_barge = None
+            self.agent_queue.clear()
+        elif isinstance(frame, InterruptionFrame):
+            self.agent_queue.clear()                  # what was queued will not be played
         elif isinstance(frame, VADUserStartedSpeakingFrame):
             self.vad_user_speaking = True
             self.pending_respond = False      # a RESPOND from before this speech is stale
@@ -95,11 +151,17 @@ class CueSession:
         self._last_buffer = buffer
         if self.stream is None or sample_rate != self.sample_rate:
             self.sample_rate = sample_rate
-            self.stream = self.model.stream(sample_rate=sample_rate, **self.settings)
+            extra = {"agent_sample_rate": self.agent_rate or 24000} if self.wants_agent_audio else {}
+            self.stream = self.model.stream(sample_rate=sample_rate, **extra, **self.settings)
         audio = np.frombuffer(buffer, dtype=np.int16)
         if num_channels > 1:
             audio = audio.reshape(-1, num_channels)[:, 0]
-        for d in self.stream.feed(audio, self.bot_speaking):
+        if self.wants_agent_audio:
+            agent = self._agent_span(len(audio) / sample_rate)
+            decisions = self.stream.feed(audio, self.bot_speaking, agent_audio=agent)
+        else:
+            decisions = self.stream.feed(audio, self.bot_speaking)
+        for d in decisions:
             logger.debug(f"Cue: {d['decision']} at {d['t_ms']} ms (bot speaking: {self.bot_speaking})")
             if d["decision"] == "RESPOND":
                 self.pending_respond = True
@@ -226,3 +288,17 @@ class CueUserTurnStopStrategy(TurnAnalyzerUserTurnStopStrategy):
     @_user_speech_timeout.setter
     def _user_speech_timeout(self, seconds: float):
         self._s.set_fallback_ms(int(seconds * 1000))
+
+
+class CueAgentAudioTap(FrameProcessor):
+    """Passes every frame on; copies the bot's outgoing audio into the Cue session (v5)."""
+
+    def __init__(self, session: CueSession, **kwargs):
+        super().__init__(**kwargs)
+        self._s = session
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, OutputAudioRawFrame) and direction == FrameDirection.DOWNSTREAM:
+            self._s.feed_agent(frame.audio, frame.sample_rate, frame.num_channels)
+        await self.push_frame(frame, direction)

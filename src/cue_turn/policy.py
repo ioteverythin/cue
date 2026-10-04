@@ -76,7 +76,13 @@ class Policy:
         return act
 
 
-def defaults(cfg: dict, **overrides) -> dict:
-    """A model's default settings, with overrides (None values are ignored)."""
-    return {**cfg["policy"]["barge_in"], **cfg["policy"]["end_of_turn"],
-            **{k: v for k, v in overrides.items() if v is not None}}
+def defaults(cfg: dict, profile: str | None = None, **overrides) -> dict:
+    """A model's default settings, then a named profile from its config (v5: "responsive",
+    "balanced", "cautious"), then overrides (None values are ignored)."""
+    out = {**cfg["policy"]["barge_in"], **cfg["policy"]["end_of_turn"]}
+    if profile:
+        profiles = cfg["policy"].get("profiles", {})
+        if profile not in profiles:
+            raise ValueError(f"no profile {profile!r} for this model; it has {sorted(profiles) or 'none'}")
+        out.update(profiles[profile])
+    return {**out, **{k: v for k, v in overrides.items() if v is not None}}

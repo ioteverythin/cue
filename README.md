@@ -37,15 +37,29 @@ for chunk in caller_audio:                         # int16 or float32 numpy, any
 
 ## Models
 
-| | Cue Tiny | Cue v4 |
-|---|---|---|
-| Load | `cue_turn.load()` | `cue_turn.load("v4")` |
-| Install | `pip install cue-turn` | `pip install "cue-turn[full]"` |
-| Runs on | CPU: about 10% of one core per call | GPU recommended (Whisper-small encoder) |
-| Decides every | 40 ms (configurable) | 160 ms |
-| Size | 6.2M parameters | 12.5M head + 87M encoder |
-| Best for | interruptions | interruptions and end of turn |
-| Weights | [IOTEverythin/cue-tiny](https://huggingface.co/IOTEverythin/cue-tiny) | [IOTEverythin/cue-v4](https://huggingface.co/IOTEverythin/cue-v4) |
+| | Cue Tiny | Cue v4 | Cue v5 |
+|---|---|---|---|
+| Load | `cue_turn.load()` | `cue_turn.load("v4")` | `cue_turn.load("v5")` |
+| Install | `pip install cue-turn` | `pip install "cue-turn[full]"` | `pip install "cue-turn[full]"` |
+| Runs on | CPU: about 10% of one core per call | GPU recommended (Whisper-small encoder) | GPU recommended (a second encoder pass while the agent speaks) |
+| Decides every | 40 ms (configurable) | 160 ms | 160 ms |
+| Trained on | synthetic calls (distilled from v4) | synthetic calls | synthetic calls + real meetings (AMI, ICSI) |
+| Hears | the caller | the caller | the caller and, optionally, the agent's own audio |
+| Weights | [IOTEverythin/cue-tiny](https://huggingface.co/IOTEverythin/cue-tiny) | [IOTEverythin/cue-v4](https://huggingface.co/IOTEverythin/cue-v4) | [IOTEverythin/cue-v5](https://huggingface.co/IOTEverythin/cue-v5) |
+
+**Cue v5** catches about twice as many real interruptions as v4 on held-out real meetings. Give it
+the agent's audio as it plays, so it can tell the agent's own voice from the caller's:
+
+```python
+cue = cue_turn.load("v5")
+stream = cue.stream(sample_rate=8000, agent_sample_rate=24000, profile="balanced")
+for caller_chunk, agent_chunk in call:          # agent_chunk: what the agent played over the same span
+    for d in stream.feed(caller_chunk, assistant_speaking=bot_is_playing(), agent_audio=agent_chunk):
+        print(d)
+```
+
+Without `agent_audio`, v5 runs with that input at zero (it was also trained that way). v5's
+setting profiles: `responsive`, `balanced` (default) and `cautious`; see its model card.
 
 The weights download from Hugging Face on first use and are cached. `load()` also takes
 a Hugging Face repo id or a local folder, and `$CUE_MODEL` sets the default.
@@ -118,6 +132,8 @@ params = LLMUserAggregatorParams(
   during a backchannel are dropped from the turn.
 - **Stop:** Pipecat's `TurnAnalyzerUserTurnStopStrategy` with Cue as the turn analyzer.
 - Either can be used alone. Both share the `CueSession`, so audio is processed once.
+- With Cue v5, add `CueAgentAudioTap(cue)` just before `transport.output()` so Cue hears what the
+  bot plays: `Pipeline([..., tts, CueAgentAudioTap(cue), transport.output(), ...])`.
 - Keep a VAD analyzer in the pipeline, and feed Cue the caller's leg with echo
   cancellation on: the agent's own voice leaking back can look like an interruption.
 

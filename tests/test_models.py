@@ -72,3 +72,29 @@ def test_v4_feed_matches_step():
     fed, s2 = run(v4, a, 16000, 320, False)
     assert [d["decision"] for d in stepped if d["decision"]] == [d["decision"] for d in fed]
     np.testing.assert_allclose(s1.last_probs, s2.last_probs, atol=1e-5)
+
+
+def test_v5_agent_audio_feed_matches_step():
+    pytest.importorskip("transformers")
+    pytest.importorskip("torch")
+    v5 = _load("v5", "CUE_V5_DIR")
+    a = _call(16000, seconds=6).astype(np.float32) / 32768
+    agent = _call(16000, seconds=6, seed=1).astype(np.float32) / 32768
+    s1 = v5.stream()
+    n = s1.step_samples
+    stepped = [s1.step(a[k:k + n], True, agent_audio=agent[k:k + n]) for k in range(0, len(a) - n + 1, n)]
+    s2 = v5.stream(sample_rate=16000, agent_sample_rate=16000)
+    for k in range(0, len(a), 320):
+        s2.feed(a[k:k + 320], True, agent_audio=agent[k:k + 320])
+    np.testing.assert_allclose(s1.last_probs, s2.last_probs, atol=1e-5)
+    s3 = v5.stream()                                  # without agent audio the input is zero: different
+    for k in range(0, len(a) - n + 1, n):
+        s3.step(a[k:k + n], True)
+    assert not np.allclose(s1.last_probs, s3.last_probs, atol=1e-4)
+
+
+def test_profiles():
+    v5 = _load("v5", "CUE_V5_DIR")
+    assert v5.stream(profile="cautious").p["stop_p"] == 0.95
+    with pytest.raises(ValueError):
+        v5.stream(profile="nope")

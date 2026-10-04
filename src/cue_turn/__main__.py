@@ -25,16 +25,17 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="cue-turn", description="Run Cue on a recording and print its decisions.",
                                  epilog="settings: " + "; ".join(f"{k}: {v}" for k, v in SETTINGS.items()))
     ap.add_argument("audio", help="a recording (wav, flac, ...)")
-    ap.add_argument("--model", default=None, help='"tiny" (default), "v4", "v3", a Hugging Face repo or a folder')
+    ap.add_argument("--model", default=None, help='"tiny" (default), "v5", "v4", "v3", a Hugging Face repo or a folder')
     ap.add_argument("--channel", type=int, default=0, help="the caller's channel (default 0)")
     who = ap.add_mutually_exclusive_group()
-    who.add_argument("--bot-channel", type=int, help="the bot's channel; when it speaks is read from its energy")
+    who.add_argument("--bot-channel", type=int, help="the bot's channel; when it speaks is read from its energy (v5 also hears it)")
     who.add_argument("--bot-spans", help="JSON file: [[start_ms, end_ms], ...] when the bot speaks")
     ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE", help="a decision setting (repeatable)")
+    ap.add_argument("--profile", help='a named setting profile of the model (v5: "responsive", "balanced", "cautious")')
     ap.add_argument("--json", action="store_true", help="print the decisions as JSON")
     a = ap.parse_args(argv)
 
-    settings = {}
+    settings = {"profile": a.profile} if a.profile else {}
     for kv in a.set:
         k, _, v = kv.partition("=")
         if k not in SETTINGS or not v:
@@ -54,11 +55,19 @@ def main(argv=None):
               "only end-of-turn decisions (RESPOND) can be made", file=sys.stderr)
 
     cue = load(a.model)
-    stream = cue.stream(sample_rate=sr, **settings)
+    two = getattr(cue, "two_channel", False) and a.bot_channel is not None
+    if two:                                         # v5 also hears the bot's own channel
+        bot = read(a.audio, a.bot_channel)[0]
+        stream = cue.stream(sample_rate=sr, agent_sample_rate=sr, **settings)
+    else:
+        stream = cue.stream(sample_rate=sr, **settings)
     step = sr // 50                                 # feed 20 ms at a time, as a live call would
     out = []
     for k in range(0, len(caller), step):
-        out += stream.feed(caller[k:k + step], speaking)
+        if two:
+            out += stream.feed(caller[k:k + step], speaking, agent_audio=bot[k:k + step])
+        else:
+            out += stream.feed(caller[k:k + step], speaking)
     if a.json:
         print(json.dumps(out))
     else:
