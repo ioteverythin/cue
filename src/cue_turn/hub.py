@@ -6,6 +6,7 @@ from pathlib import Path
 
 MODELS = {
     "tiny": "IOTEverythin/cue-tiny",
+    "v5": "IOTEverythin/cue-v5",
     "v4": "IOTEverythin/cue-v4",
     "v3": "IOTEverythin/cue-v3",
 }

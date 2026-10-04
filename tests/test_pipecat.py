@@ -1,4 +1,5 @@
 """The Pipecat strategies, with a stand-in model that returns scripted decisions."""
+import numpy as np
 import pytest
 
 pytest.importorskip("pipecat")
@@ -118,3 +119,58 @@ def test_widening_the_timeout_widens_the_fallback():
     assert s.fallback_ms() == 5000
     s.feed(audio().audio, 8000)
     assert s.model.last.p["fallback_ms"] == 5000 and stop._user_speech_timeout == 5.0
+
+
+class FakeStream2(FakeStream):
+    def feed(self, audio, speaking, agent_audio=None):
+        self.fed.append((len(audio), speaking, None if agent_audio is None else agent_audio.copy()))
+        return []
+
+
+class FakeModel2(FakeModel):
+    two_channel = True
+
+    def stream(self, sample_rate, agent_sample_rate=None, **settings):
+        self.last = FakeStream2(self.script, settings.get("fallback_ms", 2000))
+        return self.last
+
+
+def test_v5_gets_the_bot_audio_as_it_plays():
+    s = CueSession(FakeModel2())
+    s.feed(audio(160).audio, 8000)                         # no tap yet: no agent audio at all
+    assert s.model.last.fed[-1][2] is None
+    s.observe(BotStartedSpeakingFrame())
+    s.feed_agent((np.ones(480) * 1000).astype(np.int16).tobytes(), 24000)    # 20 ms of bot audio
+    s.feed(audio(160).audio, 8000)                         # 20 ms of caller audio
+    a = s.model.last.fed[-1][2]
+    assert len(a) == 480 and np.allclose(a, 1000 / 32768)
+    s.feed(audio(160).audio, 8000)                         # queue empty: silence for the rest
+    assert not s.model.last.fed[-1][2].any()
+
+
+def test_v5_agent_audio_is_silence_when_the_bot_is_quiet_and_cleared_on_interruption():
+    from pipecat.frames.frames import InterruptionFrame
+    s = CueSession(FakeModel2())
+    s.observe(BotStartedSpeakingFrame())
+    s.feed_agent((np.ones(4800) * 1000).astype(np.int16).tobytes(), 24000)
+    s.observe(InterruptionFrame())
+    assert not s.agent_queue
+    s.observe(BotStoppedSpeakingFrame())
+    s.feed(audio(160).audio, 8000)
+    assert not s.model.last.fed[-1][2].any()
+
+
+async def test_tap_passes_frames_on_and_copies_bot_audio():
+    from pipecat.frames.frames import OutputAudioRawFrame
+    from pipecat.processors.frame_processor import FrameDirection
+    from cue_turn.pipecat import CueAgentAudioTap
+    s = CueSession(FakeModel2())
+    tap = CueAgentAudioTap(s)
+    pushed = []
+
+    async def push(frame, direction=FrameDirection.DOWNSTREAM):
+        pushed.append(frame)
+    tap.push_frame = push
+    f = OutputAudioRawFrame(audio=b"\x10\x00" * 480, sample_rate=24000, num_channels=1)
+    await tap.process_frame(f, FrameDirection.DOWNSTREAM)
+    assert pushed == [f] and s.agent_rate == 24000 and len(s.agent_queue) == 1

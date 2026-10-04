@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cue-turn"
-version = "0.1.0"
+version = "0.2.0"
 description = "Cue: when a voice agent should stop talking, and when it should answer. Barge-in and end-of-turn decisions from the caller's audio."
 readme = "README.md"
 requires-python = ">=3.10"   # the [pipecat] extra needs 3.11+ (Pipecat itself)
@@ -39,6 +39,7 @@ cue-turn = "cue_turn.__main__:main"
 Homepage = "https://github.com/ioteverythin/cue"
 "Model: Cue Tiny" = "https://huggingface.co/IOTEverythin/cue-tiny"
 "Model: Cue v4" = "https://huggingface.co/IOTEverythin/cue-v4"
+"Model: Cue v5" = "https://huggingface.co/IOTEverythin/cue-v5"
 
 [tool.hatch.build.targets.sdist]
 include = ["src/cue_turn", "tests", "examples", "licenses", "README.md", "LICENSE", "NOTICE"]

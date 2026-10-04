@@ -15,7 +15,7 @@ Cue listens to the caller's side of a call and decides, causally, every few tens
 from .hub import MODELS, fetch, load
 from .policy import SETTINGS, Policy
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 
 def __getattr__(name):
