@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/banner.png" alt="Cue v5: caller audio and the agent's own audio in; STOP, PAUSE or RESPOND out. 2.5x more real interruptions caught than Cue v4 on AMI meetings; 0.80 interruption recall on TurnBench." width="100%"></p>
+
 # Cue
 
 [![tests](https://github.com/ioteverythin/cue/actions/workflows/tests.yml/badge.svg)](https://github.com/ioteverythin/cue/actions/workflows/tests.yml)
