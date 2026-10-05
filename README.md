@@ -1,5 +1,8 @@
 # Cue
 
+[![tests](https://github.com/ioteverythin/cue/actions/workflows/tests.yml/badge.svg)](https://github.com/ioteverythin/cue/actions/workflows/tests.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 **When a voice agent should stop talking, and when it should answer.**
 
 Cue listens to the caller's side of a call and decides, causally, as the audio arrives:
@@ -162,7 +165,12 @@ cue-turn call.wav --model v4 --set stop_p=0.97 --json
 The code in this repository is Apache-2.0 (see [LICENSE](LICENSE) and [NOTICE](NOTICE)).
 The model weights are separate and carry their own licences, stated in each model card.
 
-## Development
+## Contributing
+
+Bug reports, wrong decisions, integrations (LiveKit, Twilio, WebRTC) and help with other
+languages and accents are all welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and
+how to send a change, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Changes are listed in
+[CHANGELOG.md](CHANGELOG.md); report security problems as described in [SECURITY.md](SECURITY.md).
 
 ```bash
 pip install -e ".[dev,pipecat]"

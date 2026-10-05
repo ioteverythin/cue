@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Model questions (training data, licences, results)
+    url: https://huggingface.co/IOTEverythin
+    about: Each Cue model card on Hugging Face describes its data, licence and evaluation.

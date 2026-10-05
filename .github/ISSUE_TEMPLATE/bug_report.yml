@@ -1,0 +1,32 @@
+name: Bug report
+description: Something crashes, or Cue makes a wrong decision
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: model
+    attributes:
+      label: Model
+      options: ["Cue Tiny", "Cue v4", "Cue v5", "Cue v3", "not model-specific"]
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: Setup
+      description: cue-turn version, profile or settings, sample rate, Python and OS; Pipecat version if used
+      placeholder: "cue-turn 0.2.0, v5 balanced, 8 kHz phone audio, Python 3.11, Ubuntu 22.04"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what should have happened
+      description: For a wrong decision, say what the caller said and when (e.g. "said 'okay' at 3.2 s while the agent spoke; Cue said STOP; should have kept talking").
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Code, a CLI command, or a traceback. Do not attach recordings of real people unless they agreed to public sharing.
+      render: python
