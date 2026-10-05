@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use Cue, please cite the paper below."
+title: "cue-turn: runtime for the Cue turn-taking models"
+type: software
+license: Apache-2.0
+repository-code: "https://github.com/ioteverythin/cue"
+authors:
+  - family-names: "Nishanth Tarun A"
+    given-names: "Joshua"
+  - family-names: "Ajitesh Varun A"
+    given-names: "Joel"
+preferred-citation:
+  type: article
+  title: "Cue: A Conversation Reflex Model for Barge-In and End-of-Turn Control in Cascaded Voice Agents"
+  authors:
+    - family-names: "Nishanth Tarun A"
+      given-names: "Joshua"
+    - family-names: "Ajitesh Varun A"
+      given-names: "Joel"
+  year: 2026
+  publisher:
+    name: "Zenodo"
+  doi: "10.5281/zenodo.23144482"
+  url: "https://doi.org/10.5281/zenodo.23144482"
+  notes: "Preprint"

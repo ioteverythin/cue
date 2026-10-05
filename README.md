@@ -4,8 +4,11 @@
 
 [![tests](https://github.com/ioteverythin/cue/actions/workflows/tests.yml/badge.svg)](https://github.com/ioteverythin/cue/actions/workflows/tests.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23144482.svg)](https://doi.org/10.5281/zenodo.23144482)
 
 **When a voice agent should stop talking, and when it should answer.**
+
+**Paper:** *Cue: A Conversation Reflex Model for Barge-In and End-of-Turn Control in Cascaded Voice Agents*, preprint, 2026. [doi:10.5281/zenodo.23144482](https://doi.org/10.5281/zenodo.23144482) · [OpenAIRE research archive](https://explore.openaire.eu/search/result?pid=10.5281%2Fzenodo.23144482)
 
 Cue listens to the caller's side of a call and decides, causally, as the audio arrives:
 
@@ -169,6 +172,22 @@ cue-turn call.wav --model v4 --set stop_p=0.97 --json
 - **Short standalone turns** like "Hello?" can get a low end-of-turn probability; the
   `fallback_ms` timer answers them.
 - Cue decides *when* to stop or answer, not *what* was said.
+
+## Citation
+
+If you use Cue in your work, please cite the paper:
+
+```bibtex
+@misc{cue2026,
+  title     = {Cue: A Conversation Reflex Model for Barge-In and End-of-Turn Control in Cascaded Voice Agents},
+  author    = {Nishanth Tarun A, Joshua and Ajitesh Varun A, Joel},
+  year      = {2026},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.23144482},
+  url       = {https://doi.org/10.5281/zenodo.23144482},
+  note      = {Preprint}
+}
+```
 
 ## Licence
 
