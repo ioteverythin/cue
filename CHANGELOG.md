@@ -4,6 +4,12 @@ All notable changes to `cue-turn`. Versions follow [semantic versioning](https:/
 
 ## Unreleased
 
+- `CueSpeechController` (Pipecat): releases the bot's audio in real time so Cue can end it with a
+  short fade on STOP, and pause it on PAUSE ("wait", "one second") and resume where it stopped
+  when the caller says "okay, go on" (or after a silence); other replies drop it for a new turn.
+- `cue_turn.speech_control`: `reply_kind`, `fade`, `Playout`, usable without Pipecat.
+- Cue v4 / v5 run without `transformers`: a plain-PyTorch Whisper encoder is used when it is not
+  installed (identical outputs).
 - Contributor guide, code of conduct, security policy, issue and pull request templates, CI.
 
 ## 0.2.0

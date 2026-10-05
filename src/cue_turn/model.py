@@ -67,11 +67,13 @@ class CueModel:
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.encoder_type = c.get("encoder_type", "wavlm")
         if self.encoder_type == "whisper":
-            from transformers import WhisperFeatureExtractor
-            from transformers.models.whisper.modeling_whisper import WhisperEncoder
-            self.encoder = WhisperEncoder.from_pretrained(folder / "encoder").to(self.device).eval()
-            fe = WhisperFeatureExtractor.from_pretrained(folder / "encoder")
-            self.mel_fb = torch.tensor(fe.mel_filters, dtype=torch.float32, device=self.device)
+            from .whisper_lite import WhisperEncoderLite, mel_filters
+            try:                                       # transformers if installed, else the plain-PyTorch copy
+                from transformers.models.whisper.modeling_whisper import WhisperEncoder
+                self.encoder = WhisperEncoder.from_pretrained(folder / "encoder").to(self.device).eval()
+            except ImportError:
+                self.encoder = WhisperEncoderLite.from_folder(folder / "encoder", self.device)
+            self.mel_fb = torch.tensor(mel_filters(folder / "encoder"), dtype=torch.float32, device=self.device)
             self.win = torch.hann_window(400, device=self.device)
         else:
             from transformers import WavLMModel

@@ -174,3 +174,62 @@ async def test_tap_passes_frames_on_and_copies_bot_audio():
     f = OutputAudioRawFrame(audio=b"\x10\x00" * 480, sample_rate=24000, num_channels=1)
     await tap.process_frame(f, FrameDirection.DOWNSTREAM)
     assert pushed == [f] and s.agent_rate == 24000 and len(s.agent_queue) == 1
+
+
+class FakeController:
+    def __init__(self, session):
+        self.calls = []; session.controller = self
+
+    async def pause(self): self.calls.append("pause")
+    async def resume(self): self.calls.append("resume")
+    async def stop(self): self.calls.append("stop")
+
+
+async def test_pause_then_continue_resumes_without_a_turn():
+    s = CueSession(FakeModel([{"t_ms": 40, "decision": "PAUSE"}]))
+    c = FakeController(s); start = CueUserTurnStartStrategy(s); seen = watch(start)
+    await start.process_frame(BotStartedSpeakingFrame())
+    assert await start.process_frame(audio()) == ProcessFrameResult.CONTINUE
+    assert s.paused and c.calls == ["pause"] and seen == []
+    await start.process_frame(BotStoppedSpeakingFrame())           # the transport notices the silence
+    assert await start.process_frame(VADUserStartedSpeakingFrame()) == ProcessFrameResult.CONTINUE
+    await start.process_frame(TranscriptionFrame(text="wait", user_id="u", timestamp="0"))
+    assert s.paused and seen == ["reset"]
+    await start.process_frame(TranscriptionFrame(text="okay go on", user_id="u", timestamp="0"))
+    assert not s.paused and c.calls == ["pause", "resume"] and seen == ["reset", "reset"]
+
+
+async def test_pause_then_a_question_becomes_a_turn():
+    s = CueSession(FakeModel([{"t_ms": 40, "decision": "PAUSE"}]))
+    c = FakeController(s); start = CueUserTurnStartStrategy(s); seen = watch(start)
+    await start.process_frame(BotStartedSpeakingFrame())
+    await start.process_frame(audio())
+    r = await start.process_frame(TranscriptionFrame(text="actually what is the salary for this role", user_id="u", timestamp="0"))
+    assert r == ProcessFrameResult.STOP and not s.paused and c.calls == ["pause", "stop"] and seen == ["started"]
+
+
+async def test_stop_fades_out_then_interrupts():
+    s = CueSession(FakeModel([{"t_ms": 40, "decision": "STOP"}]))
+    c = FakeController(s); start = CueUserTurnStartStrategy(s); seen = watch(start)
+    await start.process_frame(BotStartedSpeakingFrame())
+    assert await start.process_frame(audio()) == ProcessFrameResult.STOP
+    assert c.calls == ["stop"] and seen == ["started"]
+
+
+async def test_controller_in_a_pipeline_paces_audio_in_order():
+    import time
+    from pipecat.frames.frames import OutputAudioRawFrame, TextFrame
+    from pipecat.tests.utils import run_test
+    from cue_turn.pipecat import CueSpeechController
+    s = CueSession(FakeModel2())
+    ctl = CueSpeechController(s, lookahead_ms=40)
+    frames = [OutputAudioRawFrame(audio=(np.ones(320) * (i + 1)).astype(np.int16).tobytes(), sample_rate=16000, num_channels=1)
+              for i in range(10)]                               # 10 x 20 ms
+    frames.insert(5, TextFrame(text="mid"))
+    t0 = time.perf_counter()
+    down, _ = await run_test(ctl, frames_to_send=frames, expected_down_frames=[OutputAudioRawFrame] * 5 + [TextFrame] + [OutputAudioRawFrame] * 5)
+    took = time.perf_counter() - t0
+    vals = [int(np.frombuffer(f.audio, np.int16)[0]) for f in down if isinstance(f, OutputAudioRawFrame)]
+    assert vals == list(range(1, 11))                           # in order, nothing lost
+    assert took >= 0.15                                         # released in real time, not all at once
+    assert s.agent_rate == 16000                                # Cue v5 heard what was played

@@ -137,6 +137,14 @@ params = LLMUserAggregatorParams(
 - Either can be used alone. Both share the `CueSession`, so audio is processed once.
 - With Cue v5, add `CueAgentAudioTap(cue)` just before `transport.output()` so Cue hears what the
   bot plays: `Pipeline([..., tts, CueAgentAudioTap(cue), transport.output(), ...])`.
+- Or, in the same place, `CueSpeechController(cue)`, which also controls the bot's speech:
+  - **STOP** ends it with a 30 ms fade rather than a cut;
+  - **PAUSE** ("wait", "one second") stops it but keeps the rest. When the caller next speaks:
+    "okay, go on" / "yes" / "haan" resumes it where it stopped (with a fade-in), "wait" keeps
+    waiting, anything else becomes a normal turn and the agent answers it. With no reply it
+    resumes after 20 s (`resume_after_ms`);
+  - it releases the bot's audio in real time with a 60 ms lookahead, so these take effect at once,
+    and feeds Cue v5 exactly what is being played.
 - Keep a VAD analyzer in the pipeline, and feed Cue the caller's leg with echo
   cancellation on: the agent's own voice leaking back can look like an interruption.
 

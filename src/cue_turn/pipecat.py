@@ -23,9 +23,15 @@ output so it can see what the bot plays:
                          CueAgentAudioTap(cue), transport.output(), assistant_aggregator])
 
 Without the tap, v5 runs with that input at zero (as it was also trained); v4 and Tiny ignore it.
+
+CueSpeechController, in the same place, does what the tap does and also controls the bot's speech:
+a STOP ends it with a short fade instead of a cut; a PAUSE ("wait", "one second") stops it but keeps
+the rest, which resumes where it stopped when the caller says "okay, go on" (or after a silence),
+or is dropped for a normal reply when the caller says something else. Use one or the other.
 """
 from __future__ import annotations
 
+import asyncio
 import time
 from collections import deque
 
@@ -41,8 +47,12 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     TranscriptionFrame,
     VADUserStartedSpeakingFrame,
+    CancelFrame,
+    EndFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
+    StartFrame,
+    SystemFrame,
     VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import MetricsData, TurnMetricsData
@@ -52,6 +62,7 @@ from pipecat.turns.user_start.base_user_turn_start_strategy import BaseUserTurnS
 from pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy import TurnAnalyzerUserTurnStopStrategy
 
 from .hub import load
+from .speech_control import Playout, reply_kind
 
 _MODELS: dict = {}
 
@@ -84,6 +95,9 @@ class CueSession:
         self._last_buffer = None
         self.agent_queue: deque = deque()            # bot audio not yet played (v5), float32 chunks
         self.agent_rate = 0
+        self.controller = None                       # a CueSpeechController, if in the pipeline
+        self.paused = False                          # the bot is paused, waiting for the caller
+        self.pause_text: list[str] = []
 
     @property
     def wants_agent_audio(self) -> bool:
@@ -204,9 +218,35 @@ class CueUserTurnStartStrategy(BaseUserTurnStartStrategy):
             s.feed(frame.audio, frame.sample_rate, frame.num_channels)
             d = s.take_barge()
             if d and s.bot_speaking:
+                if d["decision"] == "PAUSE" and s.controller is not None:
+                    logger.info("Cue PAUSE: pausing the bot")
+                    s.paused, s.pause_text = True, []
+                    await s.controller.pause()
+                    return ProcessFrameResult.CONTINUE
                 logger.info(f"Cue {d['decision']}: interrupting the bot")
+                if s.controller is not None:
+                    await s.controller.stop()
                 await self.trigger_user_turn_started()
                 return ProcessFrameResult.STOP
+        elif isinstance(frame, TranscriptionFrame) and s.paused:
+            # the caller's reply to a pause: still waiting, go on, or a new turn
+            s.pause_text.append(frame.text)
+            kind = reply_kind(frame.text)                 # each phrase on its own: "wait" ... "okay, go on"
+            logger.info(f"Cue: reply during pause '{' '.join(s.pause_text)}' -> {kind}")
+            if kind == "turn":
+                s.paused = False
+                if s.controller is not None:
+                    await s.controller.stop()
+                await self.trigger_user_turn_started()
+                return ProcessFrameResult.STOP
+            await self.trigger_reset_aggregation()
+            if kind == "continue":
+                s.paused = False
+                if s.controller is not None:
+                    await s.controller.resume()
+            return ProcessFrameResult.CONTINUE
+        elif s.paused:
+            return ProcessFrameResult.CONTINUE           # VAD / interim words while paused: wait for the words
         elif isinstance(frame, VADUserStartedSpeakingFrame) and not s.bot_speaking:
             await self.trigger_user_turn_started()
             return ProcessFrameResult.STOP
@@ -302,3 +342,74 @@ class CueAgentAudioTap(FrameProcessor):
         if isinstance(frame, OutputAudioRawFrame) and direction == FrameDirection.DOWNSTREAM:
             self._s.feed_agent(frame.audio, frame.sample_rate, frame.num_channels)
         await self.push_frame(frame, direction)
+
+
+class CueSpeechController(FrameProcessor):
+    """Between the TTS and transport.output(): releases the bot's audio in real time (a small
+    lookahead), so Cue can fade it out on STOP and pause / resume it on PAUSE; also feeds Cue v5
+    exactly the audio being played. Frames keep their order; system and upstream frames pass at once."""
+
+    def __init__(self, session: CueSession, lookahead_ms: int = 60, fade_ms: int = 30,
+                 resume_after_ms: int = 20000, **kwargs):
+        super().__init__(**kwargs)
+        self._s = session
+        session.controller = self
+        self._play = Playout(lookahead_ms, fade_ms)
+        self._resume_after = resume_after_ms / 1000
+        self._paused_at = None
+        self._task = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, StartFrame):
+            await self.push_frame(frame, direction)
+            self._task = self.create_task(self._run())
+            return
+        if isinstance(frame, (CancelFrame, EndFrame)):
+            if isinstance(frame, EndFrame):                  # let queued speech finish first
+                while self._play.q and not self._play.paused:
+                    await asyncio.sleep(0.02)
+            if self._task:
+                await self.cancel_task(self._task); self._task = None
+            await self.push_frame(frame, direction)
+            return
+        if direction != FrameDirection.DOWNSTREAM or isinstance(frame, SystemFrame):
+            if isinstance(frame, InterruptionFrame):
+                self._play.clear(); self._s.paused = False; self._paused_at = None
+            await self.push_frame(frame, direction)
+            return
+        if isinstance(frame, OutputAudioRawFrame):
+            self._play.put(("audio", frame.audio, frame.sample_rate, frame.num_channels, frame))
+        else:
+            self._play.put(("other", frame))
+
+    async def _send(self, items):
+        for it in items:
+            if it[0] == "audio":
+                _, pcm, sr, ch, orig = it
+                self._s.feed_agent(pcm, sr, ch)
+                await self.push_frame(OutputAudioRawFrame(audio=pcm, sample_rate=sr, num_channels=ch))
+            else:
+                await self.push_frame(it[1])
+
+    async def _run(self):
+        loop = asyncio.get_running_loop()
+        while True:
+            now = loop.time()
+            if self._play.paused and self._paused_at is not None and now - self._paused_at >= self._resume_after:
+                logger.info("Cue: no reply after the pause; resuming")
+                await self.resume()
+            await self._send(self._play.next(now))
+            await asyncio.sleep(0.01)
+
+    async def pause(self):
+        self._paused_at = asyncio.get_running_loop().time()
+        await self._send(self._play.pause())
+
+    async def resume(self):
+        self._s.paused = False; self._paused_at = None
+        self._play.resume(asyncio.get_running_loop().time())
+
+    async def stop(self):
+        self._paused_at = None
+        await self._send(self._play.stop())
