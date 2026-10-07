@@ -180,7 +180,7 @@ class FakeController:
     def __init__(self, session):
         self.calls = []; session.controller = self
 
-    async def pause(self): self.calls.append("pause")
+    async def pause(self, auto_resume=True): self.calls.append("pause" if auto_resume else "duck")
     async def resume(self): self.calls.append("resume")
     async def stop(self): self.calls.append("stop")
 
@@ -233,3 +233,64 @@ async def test_controller_in_a_pipeline_paces_audio_in_order():
     assert vals == list(range(1, 11))                           # in order, nothing lost
     assert took >= 0.15                                         # released in real time, not all at once
     assert s.agent_rate == 16000                                # Cue v5 heard what was played
+
+
+class QuietModel(FakeModel):
+    labels = ["NONE", "USER_TURN", "BACKCHANNEL", "ACCIDENTAL", "SOFT_INTERRUPT", "HARD_INTERRUPT", "TAKEOVER"]
+
+    def __init__(self, *script, quiet_from=99):
+        super().__init__(*script); self.quiet_from = quiet_from
+
+    def stream(self, sample_rate, **settings):
+        st = super().stream(sample_rate, **settings); model = self
+        feed = st.feed
+
+        def fed(audio, speaking):
+            out = feed(audio, speaking)
+            st.last_probs = np.array([1.0 if len(st.fed) >= model.quiet_from else 0.0, 1.0, 0, 0, 0, 0, 0])
+            return out
+        st.feed = fed
+        return st
+
+
+def ducking(model):
+    s = CueSession(model)
+    c = FakeController(s); c.duck_ms, c.duck_resume_ms = 1200, 240
+    start = CueUserTurnStartStrategy(s)
+    return s, c, start, watch(start)
+
+
+async def test_duck_then_backchannel_carries_on():
+    s, c, start, seen = ducking(QuietModel(quiet_from=3))       # caller audible for 2 chunks, then quiet
+    await start.process_frame(BotStartedSpeakingFrame())
+    assert await start.process_frame(VADUserStartedSpeakingFrame()) == ProcessFrameResult.CONTINUE
+    assert c.calls == ["duck"] and s.ducked_ms == 0
+    await start.process_frame(BotStoppedSpeakingFrame())        # the transport notices the silence: no turn
+    for _ in range(14):                                         # 20 ms chunks: 2 speech, then 12 quiet = 240 ms
+        r = await start.process_frame(audio())
+    assert r == ProcessFrameResult.CONTINUE and s.ducked_ms is None
+    assert c.calls == ["duck", "resume"] and seen == ["reset"]
+
+
+async def test_duck_then_caller_keeps_talking_is_their_turn():
+    s, c, start, seen = ducking(QuietModel())                   # never quiet
+    await start.process_frame(BotStartedSpeakingFrame())
+    await start.process_frame(VADUserStartedSpeakingFrame())
+    results = [await start.process_frame(audio()) for _ in range(60)]    # 60 x 20 ms = 1200 ms
+    assert results[-1] == ProcessFrameResult.STOP and c.calls == ["duck", "stop"] and seen == ["started"]
+
+
+async def test_duck_then_stop_is_their_turn_at_once():
+    s, c, start, seen = ducking(QuietModel([], [{"t_ms": 40, "decision": "STOP"}]))
+    await start.process_frame(BotStartedSpeakingFrame())
+    await start.process_frame(VADUserStartedSpeakingFrame())
+    assert await start.process_frame(audio()) == ProcessFrameResult.CONTINUE
+    assert await start.process_frame(audio()) == ProcessFrameResult.STOP
+    assert c.calls == ["duck", "stop"] and seen == ["started"]
+
+
+async def test_no_duck_without_duck_ms():
+    s = CueSession(FakeModel()); c = FakeController(s); start = CueUserTurnStartStrategy(s)
+    await start.process_frame(BotStartedSpeakingFrame())
+    assert await start.process_frame(VADUserStartedSpeakingFrame()) == ProcessFrameResult.CONTINUE
+    assert c.calls == [] and s.ducked_ms is None

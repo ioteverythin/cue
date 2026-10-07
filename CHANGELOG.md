@@ -4,6 +4,9 @@ All notable changes to `cue-turn`. Versions follow [semantic versioning](https:/
 
 ## Unreleased
 
+- `CueSpeechController(duck_ms=...)`: a duck. The bot goes quiet the moment the caller starts over it;
+  Cue's STOP (or the caller still talking after `duck_ms`) makes it their turn, the caller falling
+  quiet lets the bot carry on. Off by default.
 - `CueSpeechController` (Pipecat): releases the bot's audio in real time so Cue can end it with a
   short fade on STOP, and pause it on PAUSE ("wait", "one second") and resume where it stopped
   when the caller says "okay, go on" (or after a silence); other replies drop it for a new turn.
